@@ -89,6 +89,7 @@ def sync(context, url=url, valid_tags=valid_tags):
             try:
                 myContext.invokeFactory(id=id,type_name="News Item",title=title, article_link=link, description=description)
             except:
+                theReturn.append("News item %s exists, but we only found that by an error being thrown." % id)
                 continue
 
             theReturn.append("Created %s" % id)
