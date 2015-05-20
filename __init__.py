@@ -86,7 +86,10 @@ def sync(context, url=url, valid_tags=valid_tags):
             else:
                 myContext = context
 
-            myContext.invokeFactory(id=id,type_name="News Item",title=title, article_link=link, description=description)
+            try:
+                myContext.invokeFactory(id=id,type_name="News Item",title=title, article_link=link, description=description)
+            except:
+                continue
 
             theReturn.append("Created %s" % id)
             
