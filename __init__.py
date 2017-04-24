@@ -1,6 +1,7 @@
 import feedparser
 from datetime import datetime
 from Products.CMFCore.utils import getToolByName
+from DateTime import DateTime
 
 try:
     from zope.app.component.hooks import getSite
@@ -11,7 +12,7 @@ from AccessControl.SecurityManagement import newSecurityManager
 import urllib2
 from urllib2 import HTTPError
 from urlparse import urljoin
-from BeautifulSoup import BeautifulSoup 
+from BeautifulSoup import BeautifulSoup
 import time
 from calendar import timegm
 import re
@@ -23,16 +24,54 @@ url = 'http://news.psu.edu/rss/college/agricultural-sciences'
 
 user_agent = "Mozilla/5.0 (Windows NT 6.3; WOW64; rv:32.0) Gecko/20100101 Firefox/32.0"
 
-# Tags (excluding news-)
+# Transform from normalized tag to Plone tag
+tag_transform = {
+    'agribusiness-management-major' : 'majors-agribusiness-management',
+    'agricultural-and-extension-education-major' : 'majors-agricultural-and-extension-education',
+    'agricultural-science-major' : 'majors-agricultural-science',
+    'animal-science-major' : 'majors-animal-science',
+    'biological-engineering-major' : 'majors-biological-engineering',
+    'biorenewable-systems-major' : 'majors-biorenewable-systems',
+    'community-environment-and-development-major' : 'majors-community-environment-and-development',
+    'environmental-resource-management-major' : 'majors-environmental-resource-management',
+    'food-science-major' : 'majors-food-science',
+    'forest-ecosystem-management-major' : 'majors-forest-ecosystem-management',
+    'immunology-and-infectious-disease-major' : 'majors-immunology-and-infectious-disease',
+    'landscape-contracting-major' : 'majors-landscape-contracting',
+    'plant-sciences-major' : 'majors-plant-sciences',
+    'toxicology-major' : 'majors-toxicology',
+    'turfgrass-science-major' : 'majors-turfgrass-science',
+    'veterinary-and-biomedical-sciences-major' : 'majors-veterinary-and-biomedical-sciences',
+    'wildlife-and-fisheries-science-major' : 'majors-wildlife-and-fisheries-science',
+    'department-of-agricultural-and-biological-engineering' : 'department-agricultural-and-biological-engineering',
+    'department-of-agricultural-economics-sociology-and-education' : 'department-agricultural-economics-sociology-and-education',
+    'department-of-animal-science' : 'department-animal-science',
+    'department-of-ecosystem-science-and-management' : 'department-ecosystem-science-and-management',
+    'department-of-entomology' : 'department-entomology',
+    'department-of-food-science' : 'department-food-science',
+    'department-of-plant-pathology-and-environmental-microbiology' : 'department-plant-pathology-and-environmental-microbiology',
+    'department-of-plant-science' : 'department-plant-science',
+    'department-of-veterinary-and-biomedical-sciences' : 'department-veterinary-and-biomedical-sciences',
+    'penn-state-master-gardeners' : 'master-gardeners',
+    'penn-state-extension' : 'extension',
+}
 
+# Tags (excluding news-)
 valid_tags = [
-    'research', 
+    'research',
     'student-stories',
     'students',
     'international',
     'extension',
-    'penn-state-extension'
+    'pennsylvania-4-h',
+    'master-gardeners',
 ]
+
+# Include the "to" values from tag_transform
+valid_tags.extend(tag_transform.values())
+
+# Unique values to prevent duplicates
+valid_tags = list(set(valid_tags))
 
 IMAGE_FIELD_NAME = 'image'
 IMAGE_CAPTION_FIELD_NAME = 'imageCaption'
@@ -41,7 +80,7 @@ def sync(context, url=url, valid_tags=valid_tags):
     # Be an admin
     admin = context.acl_users.getUserById('trs22')
     admin = admin.__of__(context.acl_users)
-    newSecurityManager(None, admin) 
+    newSecurityManager(None, admin)
 
     print "Syncing RSS feeds from %s" % url
     site = getSite()
@@ -49,7 +88,7 @@ def sync(context, url=url, valid_tags=valid_tags):
     portal_catalog = getToolByName(site, 'portal_catalog')
     numeric_ids = [x for x in portal_catalog.uniqueValuesFor('id') if x.isdigit()]
     news_ids = [x.getId for x in portal_catalog.searchResults({'portal_type' : 'News Item', 'id' : numeric_ids, 'SearchText' : 'news.psu.edu'})]
-    
+
     feed = feedparser.parse(url)
 
     theReturn = []
@@ -60,11 +99,12 @@ def sync(context, url=url, valid_tags=valid_tags):
         link = item.get('links', [])[0].get('href', None).split('#')[0]
 
         date_published_parsed = item.get('published_parsed')
-        date_published = item.get('published')        
+        date_published = item.get('published')
+        updated_parsed = item.get('updated_parsed')
 
         now = datetime.now()
         dateStamp = now.strftime('%Y-%m-%d %H:%M')
-        
+
         if date_published_parsed:
             local_time = time.localtime(timegm(date_published_parsed))
             dateStamp = time.strftime('%Y-%m-%d %H:%M', local_time)
@@ -74,13 +114,16 @@ def sync(context, url=url, valid_tags=valid_tags):
                 dateStamp = time.strftime('%Y-%m-%d %H:%M', time.strptime(date_published, '%A, %B %d, %Y - %H:%M'))
             except:
                 pass
+        elif updated_parsed and isinstance(updated_parsed, time.struct_time):
+            dateStamp = time.strftime('%Y-%m-%d %H:%M', updated_parsed)
 
-        this_year = dateStamp.split('-')[0]
+        dateStamp = DateTime(dateStamp)
+        this_year = '%d' % dateStamp.year()
 
         id = str(link.split("/")[4]).split('#')[0]
 
         if id not in news_ids:
-            time.sleep(5)
+
             if this_year in context.objectIds():
                 myContext = context[this_year]
             else:
@@ -93,14 +136,14 @@ def sync(context, url=url, valid_tags=valid_tags):
                 continue
 
             theReturn.append("Created %s" % id)
-            
+
             theArticle = getattr(myContext, id)
-            
+
             # http://plone.org/documentation/how-to/set-creation-date
             theArticle.setCreationDate(dateStamp)
             theArticle.setModificationDate(dateStamp)
             theArticle.setEffectiveDate(dateStamp)
-                        
+
             theArticle.setExcludeFromNav(True)
 
             # Grab article image and set it as contentleadimage
@@ -108,7 +151,14 @@ def sync(context, url=url, valid_tags=valid_tags):
 
             tags = getTags(html, valid_tags=valid_tags)
             if tags:
-                tags = ['news-%s' % x for x in list(tags)]
+
+                # Prepend 'news-' to tags if they don't start with 'majors-' or 'department-'
+                for i in range(0, len(tags)):
+                    t = tags[i]
+                    if not any([t.startswith('%s-' % x) for x in ('majors', 'department')]):
+                        t = 'news-%s' % t
+                        tags[i] = t
+
                 theArticle.setSubject(tags)
             setImage(theArticle, html=html)
 
@@ -116,12 +166,16 @@ def sync(context, url=url, valid_tags=valid_tags):
             body_text = getBodyText(html)
             theArticle.setText(body_text)
 
+            # Unmark creation flag
+            theArticle.unmarkCreationFlag()
+
             # Publish
             if wftool.getInfoFor(theArticle, 'review_state') != 'Published':
                 wftool.doActionFor(theArticle, 'publish')
 
+            # Index
             theArticle.indexObject()
-            
+
         else:
             theReturn.append("Skipped %s" % id)
 
@@ -147,6 +201,9 @@ def getTags(html, valid_tags=[]):
             items = tags_div.findAll("a")
             article_tags.extend([normalizer.normalize(str(x.contents[0])).strip() for x in items])
 
+        # Transform tags
+        article_tags = [tag_transform.get(x, x) for x in article_tags]
+
         if valid_tags:
             tags = list(set(valid_tags) & set(article_tags))
         else:
@@ -167,7 +224,7 @@ def getHTML(url):
         req = urllib2.Request(url, headers={ 'User-Agent': user_agent })
         return urllib2.urlopen(req).read()
     except HTTPError:
-        print "404 for %s" % url 
+        print "404 for %s" % url
         return ""
 
 
@@ -183,7 +240,7 @@ def getImageAndCaption(html=None, url=None):
     img_url = ""
     img_caption = ""
     imgSrc = ""
-    
+
     for div in mySoup.findAll("div", {'class' : 'image'}):
         for img in div.findAll("img"):
             img_url = img.get('src')
@@ -216,14 +273,14 @@ def getImageAndCaption(html=None, url=None):
         imgSrc = urljoin(url, img_url)
 
     if imgSrc:
-        imgData = downloadImage(imgSrc)        
+        imgData = downloadImage(imgSrc)
         return (imgData, img_caption)
     else:
         return (None, None)
 
 def hasImage(context):
     image_field = context.getField(IMAGE_FIELD_NAME).get(context)
-    
+
     if image_field and image_field.size:
         return True
     else:
@@ -236,7 +293,7 @@ def downloadImage(url):
     except HTTPError:
         return None
     else:
-        imgData = imgFile.read()            
+        imgData = imgFile.read()
         return imgData
 
 def setImage(theArticle, image_url=None, html=None):
@@ -258,7 +315,7 @@ def setImage(theArticle, image_url=None, html=None):
                 url = None
 
             if url:
-                html = getHTML(url)            
+                html = getHTML(url)
             else:
                 return None
 
@@ -274,8 +331,7 @@ def setImage(theArticle, image_url=None, html=None):
         print "No Image for %s" % theArticle.id
 
 
-        
 def retroSetImages(context):
     for theArticle in context.listFolderContents(contentFilter={"portal_type" : "News Item"}):
-    
+
         setImage(theArticle)
