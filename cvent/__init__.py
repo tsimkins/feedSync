@@ -9,46 +9,34 @@ from HTMLParser import HTMLParseError
 
 # My imports
 from BeautifulSoup import BeautifulSoup
+from DateTime import DateTime
 from time import strptime, strftime
 import urllib2
 import sys
 import re
+import requests
 
-def agsciEvents(soup, summaryURL):
+def getCventEvents(calendar_url, summaryURL):
+
+    def fmt_date(x):
+        return DateTime(x.replace("T", ' ') + " US/Eastern")
+
     results = []
 
-    for eventRow in soup.findAll('table', {'class':'calLinks'}):
-    
-        dateCell = eventRow.find('td', {'class':'BodyTextBold1'})
-        
-        eventDate = strftime("%Y-%m-%d", strptime(dateCell.contents[0].strip(), "%B %d, %Y"))
-        
-        for eventCell in eventRow.findAll('td', {'class':'BodyText1'}):
-            eventLink = eventCell.find('a')
-            eventId = eventLink['e']
-            eventTitle = str(eventLink.contents[0])
+    response = requests.get(calendar_url)
+
+    if response.status_code == 200:
+
+        for _ in response.json():
+
+            eventId = _['id']
+            eventTitle = _['title']
+            eventStartDate = fmt_date(_['startDate'])
+            eventEndDate = fmt_date(_['endDate'])
             eventURL = getCventSummaryURL(summaryURL % eventId)
+            eventLocation = _.get('location', '')
 
-            results.append((eventLink, eventId, eventTitle, eventDate, eventURL))
-
-    return results
-
-def extensionEvents(soup, summaryURL):
-    results = []
-    
-    eventTable = soup.find('table', {'id' : 'listMode'})
-
-    for eventRow in eventTable.findAll('td', {'class':re.compile("ListCellBgrd1")}):
-    
-        eventTitle = eventRow.find('td', {'class':'BodyTextBold1'}).contents[0]
-        
-        for eventLink in eventRow.findAll('a'):
-            eventDateText =  eventLink.contents[0].strip()     
-            eventDate = strftime("%Y-%m-%d", strptime(eventDateText, "%m/%d/%y"))
-            eventId = eventLink['e']
-            eventURL = getCventSummaryURL(summaryURL % eventId)
-
-            results.append((eventLink, eventId, eventTitle, eventDate, eventURL))
+            results.append((eventId, eventTitle, eventStartDate, eventEndDate, eventURL, eventLocation))
 
     return results
 
@@ -63,68 +51,68 @@ def importEvents(context, emailUsers=['trs22'],
                  cventURL = "http://guest.cvent.com/EVENTS/Calendar/Calendar.aspx?cal=9d9ed7b8-dd56-46d5-b5b3-8fb79e05acaf",
                  summaryURL = "http://guest.cvent.com/EVENTS/info/summary.aspx?e=%s",
                  conferenceURL="https://agsci.psu.edu/conferences/event-calendar",
-                 parseSoup=agsciEvents,
+                 parseSoup=None,
+                 calendar_url="https://agsci.psu.edu/cvent.json",
                  owner=None):
 
     myStatus = []
     newEvents = []
 
     # More Zopey goodness
-    
+
     if owner:
         admin = context.acl_users.getUserById(owner)
     else:
         admin = context.acl_users.getUserById('trs22')
 
     admin = admin.__of__(context.acl_users)
-    newSecurityManager(None, admin) 
-    
+    newSecurityManager(None, admin)
+
     portal = getSiteManager(context)
-    
-    # Grab CVENT data and create events
-    page = urllib2.urlopen(cventURL)
-    myHTML = "\n".join(page).replace(r'\"', '"')
 
-    # Broken img tag was causing a parse error.
-    removeImage = re.compile("</*img.*?", re.I|re.M)
-    myHTML = removeImage.sub("", myHTML)
-
-    soup = BeautifulSoup(myHTML)
     cventIDs = []
-    
+
     # Get listing of events, and their cventid if it exists
     for myEvent in context.listFolderContents(contentFilter={"portal_type" : "Event"}):
         cventIDs.append(myEvent.id)
         myCventID = myEvent.getProperty('cventid')
         if myCventID:
             cventIDs.append(myCventID)
-    
-    for (eventLink, eventId, eventTitle, eventDate, eventURL) in parseSoup(soup, summaryURL):
+
+    for (
+        eventId,
+        eventTitle,
+        eventStartDate,
+        eventEndDate,
+        eventURL,
+        eventLocation
+    ) in getCventEvents(calendar_url, summaryURL):
 
         eventTitle = eventTitle.decode("utf-8")
 
         if not cventIDs.count(eventId):
             newEvents.append("<li><a href=\"%s/%s\">%s</a></li>" % (conferenceURL, eventId, eventTitle))
-    
+
             context.invokeFactory(type_name="Event",
                     id=eventId,
                     title=eventTitle,
-                    start_date=eventDate,
-                    end_date=eventDate,
+                    start_date=eventStartDate.strftime('%Y-%m-%d'),
+                    start_time=eventStartDate.strftime('%H:%M'),
+                    end_date=eventEndDate.strftime('%Y-%m-%d'),
+                    stop_time=eventEndDate.strftime('%H:%M'),
                     event_url=eventURL,
-                    location="")  
+                    location="")
 
             myObject = getattr(context, eventId)
             myObject.manage_addProperty('cventid', eventId, 'string')
             myObject.setExcludeFromNav(True)
             myObject.setLayout("event_redirect_view")
             myObject.reindexObject()
-    
+
             myStatus.append("Created event %s (id %s)" % (eventTitle, eventId))
 
         else:
             myStatus.append("Skipped event %s (id %s)" % (eventTitle, eventId))
-            #newEvents.append("<li>NOT: <a href=\"%s/%s\">%s</a></li>" % (conferenceURL, eventId, eventLink.contents[0]))
 
     if newEvents:
         myStatus.append("Sending email to: %s" % ", ".join(emailUsers))
@@ -136,7 +124,7 @@ def importEvents(context, emailUsers=['trs22'],
 
         for myUser in emailUsers:
             mTo = "%s@psu.edu" % myUser
-        
+
             mMsg = "\n".join(["\n\n", mTitle, "<ul>", statusText, "<ul>"])
             mailHost.secureSend(mMsg.encode('utf-8'), mto=mTo, mfrom=mFrom, subject=mSubj, subtype='html')
 
