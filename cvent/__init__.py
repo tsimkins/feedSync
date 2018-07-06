@@ -3,6 +3,7 @@
 # Zope imports
 from zope.component import getSiteManager
 from Products.CMFCore.utils import getToolByName
+from Products.CMFPlone.utils import safe_unicode
 from AccessControl.SecurityManagement import newSecurityManager
 from HTMLParser import HTMLParseError
 #import transaction
@@ -88,7 +89,7 @@ def importEvents(context, emailUsers=['trs22'],
         eventLocation
     ) in getCventEvents(calendar_url, summaryURL):
 
-        eventTitle = eventTitle.decode("utf-8")
+        eventTitle = safe_unicode(eventTitle)
 
         if not cventIDs.count(eventId):
             newEvents.append("<li><a href=\"%s/%s\">%s</a></li>" % (conferenceURL, eventId, eventTitle))
