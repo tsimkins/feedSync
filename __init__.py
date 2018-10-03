@@ -241,6 +241,10 @@ def getImageAndCaption(html=None, url=None):
     img_caption = ""
     imgSrc = ""
 
+    # Remove related nodes
+    for _ in mySoup.findAll("div", {'class' : 'related-nodes'}):
+        __ = _.extract()
+
     for div in mySoup.findAll("div", {'class' : 'image'}):
         for img in div.findAll("img"):
             img_url = img.get('src')
