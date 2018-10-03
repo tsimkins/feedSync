@@ -245,12 +245,12 @@ def getImageAndCaption(html=None, url=None):
     for _ in mySoup.findAll("div", {'class' : 'related-nodes'}):
         __ = _.extract()
 
-    for div in mySoup.findAll("div", {'class' : 'image'}):
+    for div in mySoup.findAll("div", attrs={'class' : re.compile('image')}):
         for img in div.findAll("img"):
             img_url = img.get('src')
             if img_url:
                 parent = div.parent
-                for caption in parent.findAll("div", {'class' : 'caption'}):
+                for caption in parent.findAll("div", attrs={'class' : re.compile('short-caption')}):
                     img_caption = htmlToPlainText(caption.prettify())
                     if img_caption:
                         break
